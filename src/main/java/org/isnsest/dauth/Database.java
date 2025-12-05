@@ -1,4 +1,4 @@
-package org.isnsest.nAuth;
+package org.isnsest.dauth;
 
 import org.bukkit.plugin.java.JavaPlugin;
 

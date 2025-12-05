@@ -1,4 +1,4 @@
-package org.isnsest.nAuth;
+package org.isnsest.dauth;
 
 import com.destroystokyo.paper.event.player.PlayerConnectionCloseEvent;
 import io.papermc.paper.connection.PlayerConfigurationConnection;
@@ -27,7 +27,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
-public final class NAuth extends JavaPlugin {
+public final class DAuth extends JavaPlugin {
 
     private Database database;
 
@@ -53,7 +53,7 @@ public final class NAuth extends JavaPlugin {
 
     private static class EventListener implements Listener {
 
-        private final NAuth plugin;
+        private final DAuth plugin;
 
         private final Map<UUID, Integer> wrongs = new HashMap<>();
         private final Map<UUID, CompletableFuture<String>> awaitingResponse = new ConcurrentHashMap<>();
@@ -61,10 +61,10 @@ public final class NAuth extends JavaPlugin {
         private static final ClickCallback.Options options =
                 ClickCallback.Options.builder().uses(1).lifetime(ClickCallback.DEFAULT_LIFETIME).build();
 
-        public EventListener(NAuth plugin) {
+        public EventListener(DAuth plugin) {
             this.plugin = plugin;
 
-            plugin.getCommand("reload").setExecutor((sender, command, label, args) -> {
+            plugin.getCommand("nreload").setExecutor((sender, command, label, args) -> {
                 sender.sendMessage(ChatColor.GREEN + "The configuration has been reloaded.");
                 plugin.reloadConfig();
                 return true;
@@ -198,7 +198,7 @@ public final class NAuth extends JavaPlugin {
                             mode == AuthMode.REGISTER ? mes("button-register", "Register") :
                                     mes("button-change", "Change");
 
-            DialogBase base = DialogBase.builder(Component.text("NAuth"))
+            DialogBase base = DialogBase.builder(Component.text("DAuth"))
                     .inputs(inputs)
                     .body(List.of(DialogBody.plainMessage(title)))
                     .canCloseWithEscape(canCloseWithEscape)
