@@ -64,7 +64,7 @@ public final class DAuth extends JavaPlugin {
         public EventListener(DAuth plugin) {
             this.plugin = plugin;
 
-            plugin.getCommand("nreload").setExecutor((sender, command, label, args) -> {
+            plugin.getCommand("dreload").setExecutor((sender, command, label, args) -> {
                 sender.sendMessage(ChatColor.GREEN + "The configuration has been reloaded.");
                 plugin.reloadConfig();
                 return true;
