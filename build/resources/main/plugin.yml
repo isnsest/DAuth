@@ -1,0 +1,15 @@
+name: NAuth
+version: '1.0'
+main: org.isnsest.nAuth.NAuth
+api-version: '1.21'
+author: isnsest
+commands:
+  changepassword:
+    description: Change your password
+    aliases:
+      - changepass
+    usage: /changepassword
+  nreload:
+    description: Reload config
+    permission: nauth.reload
+    usage: /nreload

@@ -1,0 +1,26 @@
+messages:
+  title: "Authentication is required to join the server."
+  title-change: "Change your password"
+
+  password-label: "&fPassword"
+  password-again-label: "&fRepeat password"
+  old-password-label: "&fOld password"
+  new-password-label: "&fNew password"
+
+  button-login: "Login"
+  button-register: "Register"
+  button-change: "Change"
+  button-quit: "Quit"
+
+  error-password-mismatch: "&cPasswords do not match."
+  error-password-length: "&cPassword must be between %min% and %max% characters."
+  error-wrong-password: "&cWrong password."
+  error-timeout: "Authentication timeout."
+
+  password-change-success: "&aPassword changed successfully!"
+  quit: "You have left the server."
+
+limits:
+  min-password-length: 5
+  max-password-length: 32
+  timeout-seconds: 60
