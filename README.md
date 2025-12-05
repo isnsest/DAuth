@@ -4,7 +4,7 @@
 <img width="287" height="204" alt="image" src="https://github.com/user-attachments/assets/85f64d6f-4ed7-4a67-a9a0-8ea745643f8e" /> <img width="285" height="240" alt="image" src="https://github.com/user-attachments/assets/daea8a82-ec67-4265-a8c8-34783730a035" /> <img width="280" height="324" alt="image" src="https://github.com/user-attachments/assets/ec8b9151-b432-458d-9536-6347fed8e436" />
 
 
-# 🛡️ NAuth
+# 🛡️ DAuth
 
 **NAuth** is a modern and simple authentication plugin that completely relieves players from the need to type `/login` or `/register` commands in chat. All interaction takes place through convenient built-in game menus.
 
@@ -33,7 +33,7 @@ Instead of spawning the player in the world and freezing them, the plugin meets 
 | Command | Who uses it | Description |
 | :--- | :--- | :--- |
 | `/changepassword` | Players | Opens the menu to change the current password. |
-| `/reload` | Admins | Reloads the plugin config and messages. |
+| `/dreload` | Admins | Reloads the plugin config and messages. |
 
 ---
 
