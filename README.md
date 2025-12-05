@@ -1,7 +1,7 @@
 
 ***
 
-<img width="310" height="244" alt="image" src="https://github.com/user-attachments/assets/4a0df66e-6426-4e21-bf1e-6c33535be357" /> <img width="295" height="240" alt="image" src="https://github.com/user-attachments/assets/c6ae870e-17b7-45c2-a26f-9dfa6144e253" /> <img width="220" height="280" alt="image" src="https://github.com/user-attachments/assets/4ff68731-6168-4d69-a142-939a23c2f751" />
+<img width="300" height="244" alt="image" src="https://github.com/user-attachments/assets/4a0df66e-6426-4e21-bf1e-6c33535be357" /> <img width="295" height="240" alt="image" src="https://github.com/user-attachments/assets/c6ae870e-17b7-45c2-a26f-9dfa6144e253" /> <img width="210" height="280" alt="image" src="https://github.com/user-attachments/assets/4ff68731-6168-4d69-a142-939a23c2f751" />
 
 
 # 🛡️ DAuth
