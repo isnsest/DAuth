@@ -1,5 +1,5 @@
 name: DAuth
-version: '1.0'
+version: '1.1'
 main: org.isnsest.dauth.DAuth
 api-version: '1.21'
 author: isnsest
