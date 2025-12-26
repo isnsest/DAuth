@@ -20,11 +20,39 @@ messages:
 
   password-change-success: "&aPassword changed successfully!"
   quit: "You have left the server."
+  logout: "Logout"
+
+  2fa:
+    only-players: "&cOnly players can use this command."
+    admin-no-perm: "&cYou do not have permission."
+    usage-reset: "&cUsage: /2fa reset <player>"
+    reset-success: "&a2FA has been reset for player %player%"
+
+    already-enabled: "&cYou already have two-factor authentication enabled!"
+
+    setup-click-qr: "&6[Click here to open the QR code]"
+    setup-click-code: "&bCode: &f%code% &7(Click to copy)"
+    setup-info: "&eEnter /2fa code <code_from_the_app>"
+
+    no-setup: "&cSetup has not been started. First, enter /2fa setup."
+    enabled: "&aTwo-factor protection successfully enabled!"
+    wrong-code: "&cIncorrect code."
+    nan-error: "&cThe code must consist only of numbers."
+    removed: "&eTwo-factor protection has been removed."
+
+    help:
+      - "&7------ &6Help with 2FA &7------"
+      - "&e/2fa setup &7- Setting up protection"
+      - "&e/2fa code <code> &7- Confirming the code"
+      - "&e/2fa remove &7- Removing protection"
+
+    help-admin: "&c/2fa reset <player> &7- Reset someone else's 2FA"
 
 limits:
   min-password-length: 5
   max-password-length: 32
   timeout-seconds: 60
+  session: 300
 
 links:
   discord: "<link>"

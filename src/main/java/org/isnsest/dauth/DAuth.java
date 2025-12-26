@@ -1,7 +1,9 @@
 package org.isnsest.dauth;
 
 import com.destroystokyo.paper.event.player.PlayerConnectionCloseEvent;
+import com.warrenstrange.googleauth.GoogleAuthenticator;
 import io.papermc.paper.connection.PlayerConfigurationConnection;
+import io.papermc.paper.connection.PlayerGameConnection;
 import io.papermc.paper.dialog.Dialog;
 import io.papermc.paper.dialog.DialogResponseView;
 import io.papermc.paper.event.connection.configuration.AsyncPlayerConnectionConfigureEvent;
@@ -15,15 +17,17 @@ import net.kyori.adventure.audience.Audience;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.event.ClickCallback;
 import net.kyori.adventure.text.event.ClickEvent;
+import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextColor;
-import org.bukkit.*;
+import org.bukkit.Bukkit;
+import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerLoginEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 
-import java.net.URI;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -32,6 +36,7 @@ import java.util.concurrent.TimeUnit;
 public final class DAuth extends JavaPlugin {
 
     private Database database;
+    public final Map<UUID, String> pendingSetupSecrets = new ConcurrentHashMap<>();
 
     @Override
     public void onEnable() {
@@ -39,7 +44,79 @@ public final class DAuth extends JavaPlugin {
         database = new Database(this);
         Bukkit.getPluginManager().registerEvents(new EventListener(this), this);
 
-        Metrics metrics = new Metrics(this, 28317);
+        getCommand("logout").setExecutor((sender, command, label, args) -> {
+            if (sender instanceof Player player) {
+                PlayerGameConnection connection = player.getConnection();
+                String ip = Arrays.stream(connection.getAddress().toString().split(":")).findFirst().orElse("null");
+                LogoutTimerManager.ipList.remove(ip);
+                player.kick(Component.text(mes("logout", "Logout")));
+            }
+            return true;
+        });
+
+        getCommand("2fa").setExecutor(new Command2FA(this));
+
+        getCommand("unregister").setExecutor((sender, command, label, args) -> {
+            if (args.length > 0) {
+                if (!sender.hasPermission("dauth.admin.unregister")) {
+                    sender.sendMessage(ChatColor.RED + "No permission.");
+                    return true;
+                }
+                String targetName = args[0];
+                Player player = Bukkit.getPlayer(targetName);
+
+                UUID targetUUID = Bukkit.getOfflinePlayer(targetName).getUniqueId();
+
+                database.deleteUser(targetUUID);
+
+                sender.sendMessage(ChatColor.GREEN + "Player " + targetName + " unregistered.");
+
+                if (player != null) player.kick(Component.text("Account deleted. Please rejoin."));
+                return true;
+            }
+
+            if (!(sender instanceof Player player)) {
+                sender.sendMessage(ChatColor.RED + "Console usage: /unregister <player>");
+                return true;
+            }
+
+            UUID uuid = player.getUniqueId();
+
+            if (database.getPassword(uuid) == null) {
+                player.sendMessage(ChatColor.RED + "You are not registered.");
+                return true;
+            }
+
+            database.deleteUser(uuid);
+
+            player.sendMessage(ChatColor.GREEN + "You have been unregistered.");
+            player.kick(Component.text("Account deleted. Please rejoin."));
+
+            return true;
+        });
+
+
+        getCommand("dreload").setExecutor((sender, command, label, args) -> {
+            sender.sendMessage(ChatColor.GREEN + "Configuration reloaded.");
+            reloadConfig();
+            return true;
+        });
+
+        getCommand("changepassword").setExecutor((sender, cmd, lbl, args) -> {
+            if (!(sender instanceof Player player)) {
+                sender.sendMessage("Only players.");
+                return true;
+            }
+            UUID uuid = player.getUniqueId();
+            if (database.getPassword(uuid) == null) {
+                player.sendMessage(ChatColor.RED + "You are not registered.");
+                return true;
+            }
+
+            player.showDialog(EventListener.createDialogStatic(this, EventListener.AuthMode.CHANGE,
+                    Component.text(mes("title-change", "Change Password")), uuid));
+            return true;
+        });
     }
 
     @Override
@@ -49,105 +126,99 @@ public final class DAuth extends JavaPlugin {
         return database;
     }
 
-    private enum AuthMode {
-        LOGIN,
-        REGISTER,
-        CHANGE
+
+    public String mes(String key, String def) {
+        String raw = getConfig().getString("messages." + key, def);
+        int min = getConfig().getInt("limits.min-password-length", 3);
+        int max = getConfig().getInt("limits.max-password-length", 32);
+
+        raw = ChatColor.translateAlternateColorCodes('&', raw);
+        return raw.replace("%min%", String.valueOf(min))
+                .replace("%max%", String.valueOf(max));
     }
 
-    private static class EventListener implements Listener {
+    public Component component(String key, String def) {
+        String text = getConfig().getString("messages." + key, def);
+        return net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer.legacyAmpersand().deserialize(text);
+    }
 
+    public List<String> list(String key) {
+        List<String> list = getConfig().getStringList("messages." + key);
+        if (list.isEmpty()) return List.of("Missing list: " + key);
+        return list.stream()
+                .map(s -> ChatColor.translateAlternateColorCodes('&', s))
+                .toList();
+    }
+
+
+    public static class EventListener implements Listener {
         private final DAuth plugin;
-
+        private final GoogleAuthenticator gAuth = new GoogleAuthenticator();
         private final Map<UUID, Integer> wrongs = new HashMap<>();
         private final Map<UUID, CompletableFuture<String>> awaitingResponse = new ConcurrentHashMap<>();
+        private static final ClickCallback.Options options = ClickCallback.Options.builder().uses(1).lifetime(ClickCallback.DEFAULT_LIFETIME).build();
 
-        private static final ClickCallback.Options options =
-                ClickCallback.Options.builder().uses(1).lifetime(ClickCallback.DEFAULT_LIFETIME).build();
+        public enum AuthMode { LOGIN, REGISTER, CHANGE, VERIFY_2FA }
 
         public EventListener(DAuth plugin) {
             this.plugin = plugin;
-
-            plugin.getCommand("dreload").setExecutor((sender, command, label, args) -> {
-                sender.sendMessage(ChatColor.GREEN + "The configuration has been reloaded.");
-                plugin.reloadConfig();
-                return true;
-            });
-            plugin.getCommand("changepassword").setExecutor((sender, cmd, lbl, args) -> {
-                if (!(sender instanceof Player player)) {
-                    sender.sendMessage("Only players.");
-                    return true;
-                }
-
-                UUID uuid = player.getUniqueId();
-
-                if (plugin.db().getPassword(uuid) == null) {
-                    player.sendMessage(ChatColor.RED + "You are not registered.");
-                    return true;
-                }
-
-                player.showDialog(
-                        createDialog(
-                                AuthMode.CHANGE,
-                                Component.text(mes("title-change", "Change your password")),
-                                uuid
-                        )
-                );
-                return true;
-            });
         }
-
-        //
 
         @EventHandler
         public void onPlayerConfigure(AsyncPlayerConnectionConfigureEvent event) {
-
             PlayerConfigurationConnection connection = event.getConnection();
-            UUID uniqueId = connection.getProfile().getId();
-            if (uniqueId == null) {
+            String ip = Arrays.stream(connection.getAddress().toString().split(":")).findFirst().orElse("null");
+
+            UUID id = connection.getProfile().getId();
+            if (id == null) return;
+            if (LogoutTimerManager.ipList.contains(ip) && plugin.db().getPassword(id) != null) {
+                LogoutTimerManager.cancelTimer(id);
                 return;
             }
 
-            AuthMode mode = plugin.db().getPassword(uniqueId) == null
-                    ? AuthMode.REGISTER : AuthMode.LOGIN;
+            AuthMode mode = plugin.db().getPassword(id) == null ? AuthMode.REGISTER : AuthMode.LOGIN;
 
-            Dialog dialog = createDialog(
-                    mode,
-                    Component.text(mes("title", "Authentication is required to join the server.")),
-                    uniqueId
-            );
-
-            int timeout = plugin.getConfig().getInt("limits.timeout-seconds", 60);
+            Dialog dialog = createDialog(mode, Component.text(plugin.mes("title", "Auth required")), id);
 
             CompletableFuture<String> response = new CompletableFuture<>();
+            int timeout = plugin.getConfig().getInt("limits.timeout-seconds", 60);
             response.completeOnTimeout("Timeout", timeout, TimeUnit.SECONDS);
 
-            awaitingResponse.put(uniqueId, response);
+            awaitingResponse.put(id, response);
+            connection.getAudience().showDialog(dialog);
 
-            Audience audience = connection.getAudience();
-            audience.showDialog(dialog);
 
-            switch (response.join()) {
+            String res = response.join();
+
+            awaitingResponse.remove(id);
+            wrongs.remove(id);
+
+
+            switch (res) {
                 case "Timeout" -> {
-                    audience.closeDialog();
-                    connection.disconnect(Component.text(mes("error-timeout", "Authentication timeout.")));
+                    connection.getAudience().closeDialog();
+                    connection.disconnect(Component.text(plugin.mes("error-timeout", "Authentication timeout.")));
                 }
                 case "Wrong password" -> {
-                    audience.closeDialog();
-                    connection.disconnect(Component.text(mes("error-wrong-password", "Wrong password.")));
+                    connection.getAudience().closeDialog();
+                    connection.disconnect(Component.text(plugin.mes("error-wrong-password", "Wrong password.")));
                 }
                 case "Exit" -> {
-                    audience.closeDialog();
-                    connection.disconnect(Component.text(mes("quit", "You have left the server.")));
+                    connection.getAudience().closeDialog();
+                    connection.disconnect(Component.text(plugin.mes("quit", "You have left the server.")));
                 }
-                case "Done" -> audience.closeDialog();
-            }
+                case "Done" -> {
+                    connection.getAudience().closeDialog();
+                    LogoutTimerManager.ipList.add(ip);
+                }
 
-            awaitingResponse.remove(uniqueId);
-            wrongs.remove(uniqueId);
+                default -> {
+                    connection.getAudience().closeDialog();
+                    connection.disconnect(Component.text(plugin.mes("error-generic", res)));
+                }
+            }
         }
 
-        //
 
         @EventHandler
         public void onLogin(PlayerLoginEvent event) {
@@ -156,247 +227,158 @@ public final class DAuth extends JavaPlugin {
             }
         }
 
-        //
-
         @EventHandler
-        void onConnectionClose(PlayerConnectionCloseEvent event) {
-            awaitingResponse.remove(event.getPlayerUniqueId());
-            wrongs.remove(event.getPlayerUniqueId());
+        public void onPlayerQuit(PlayerQuitEvent event) {
+            UUID playerId = event.getPlayer().getUniqueId();
+            PlayerGameConnection connection = event.getPlayer().getConnection();
+            String ip = Arrays.stream(connection.getAddress().toString().split(":")).findFirst().orElse("null");
+            if (LogoutTimerManager.ipList.contains(ip)) {
+                LogoutTimerManager.startTimer(playerId, () -> LogoutTimerManager.ipList.remove(ip), plugin.getConfig().getInt("limits.session", 300));
+            }
         }
 
-        //
+        @EventHandler
+        void onClose(PlayerConnectionCloseEvent e) {
+            awaitingResponse.remove(e.getPlayerUniqueId());
+            wrongs.remove(e.getPlayerUniqueId());
+            plugin.pendingSetupSecrets.remove(e.getPlayerUniqueId());
+        }
+
+
+        public static Dialog createDialogStatic(DAuth plugin, AuthMode mode, Component title, UUID uuid) {
+            return new EventListener(plugin).createDialog(mode, title, uuid);
+        }
 
         private Dialog createDialog(AuthMode mode, Component title, UUID uuid) {
-
             int max = plugin.getConfig().getInt("limits.max-password-length", 32);
-            List<DialogInput> inputs = List.of();
-
-            boolean canCloseWithEscape = false;
+            List<DialogInput> inputs = new ArrayList<>();
+            boolean canCloseWithEscape = (mode == AuthMode.CHANGE);
 
             switch (mode) {
                 case LOGIN -> inputs = List.of(
-                        DialogInput.text("password1", 150,
-                                Component.text(mes("password-label", "Password")), true, "", max, null)
+                        DialogInput.text("password1", 150, Component.text(plugin.mes("password-label", "Password")), true, "", max, null)
                 );
                 case REGISTER -> inputs = List.of(
-                        DialogInput.text("password1", 150,
-                                Component.text(mes("password-label", "Password")), true, "", max, null),
-                        DialogInput.text("password2", 150,
-                                Component.text(mes("password-again-label", "Repeat password")), true, "", max, null)
+                        DialogInput.text("password1", 150, Component.text(plugin.mes("password-label", "Password")), true, "", max, null),
+                        DialogInput.text("password2", 150, Component.text(plugin.mes("password-again-label", "Repeat")), true, "", max, null)
                 );
-                case CHANGE -> {
-                        canCloseWithEscape = true;
-                        inputs = List.of(
-                        DialogInput.text("old", 150,
-                                Component.text(mes("old-password-label", "Old password")), true, "", max, null),
-                        DialogInput.text("new1", 150,
-                                Component.text(mes("new-password-label", "New password")), true, "", max, null),
-                        DialogInput.text("new2", 150,
-                                Component.text(mes("password-again-label", "Repeat password")), true, "", max, null)
+                case VERIFY_2FA -> inputs = List.of(
+                        DialogInput.text("code", 150, Component.text("2FA Code"), false, "", 6, null)
                 );
-                }
+                case CHANGE -> inputs = List.of(
+                        DialogInput.text("old", 150, Component.text(plugin.mes("old-password-label", "Old password")), true, "", max, null),
+                        DialogInput.text("new1", 150, Component.text(plugin.mes("new-password-label", "New password")), true, "", max, null),
+                        DialogInput.text("new2", 150, Component.text(plugin.mes("password-again-label", "Repeat password")), true, "", max, null)
+                );
             }
 
-            String buttonText =
-                    mode == AuthMode.LOGIN ? mes("button-login", "Login") :
-                            mode == AuthMode.REGISTER ? mes("button-register", "Register") :
-                                    mes("button-change", "Change");
+            String btn = switch(mode) {
+                case LOGIN -> plugin.mes("button-login", "Login");
+                case REGISTER -> plugin.mes("button-register", "Register");
+                case VERIFY_2FA -> "Verify";
+                case CHANGE -> plugin.mes("button-change", "Change");
+            };
 
-            DialogBase base = DialogBase.builder(Component.text("DAuth"))
-                    .inputs(inputs)
-                    .body(List.of(DialogBody.plainMessage(title)))
-                    .canCloseWithEscape(canCloseWithEscape)
-                    .build();
-
+            List<DialogInput> finalInputs = inputs;
             List<ActionButton> actionButtons = new ArrayList<>();
-            actionButtons.add(ActionButton.create(
-                    Component.text(buttonText),
-                    null,
-                    125,
-                    DialogAction.customClick(
-                            (view, audience) -> authPlayer(view, audience, uuid, mode),
-                            options
-                    )));
-            if (!plugin.getConfig().getString("links.discord", "<link>").equals("<link>")) {
-                try {
-                    URI url = new URI(plugin.getConfig().getString("links.discord", "<link>"));
-                    actionButtons.add(ActionButton.create(
-                            Component.text(mes("button-discord", "Discord")),
-                            null,
-                            65,
-                            DialogAction.staticAction(ClickEvent.openUrl(url.toURL()))));
-                } catch (Exception ignored) {
-                }
+            actionButtons.add(ActionButton.create(Component.text(btn), null, 125,
+                    DialogAction.customClick((v, a) -> auth(v, a, uuid, mode), options)));
+            String discordLink = plugin.getConfig().getString("links.discord", "<link>");
+            if (!discordLink.equalsIgnoreCase("<link>")) {
+                actionButtons.add(ActionButton.create(Component.text(plugin.mes("button-discord", "Discord")), null, 60,
+                        DialogAction.staticAction(ClickEvent.openUrl(discordLink))));
             }
-
-            return Dialog.create(builder -> builder.empty().base(base)
-                    .type(DialogType.multiAction(actionButtons
-                    ).exitAction(
-                            ActionButton.create(
-                                    Component.text(mes("button-quit", "Quit")),
-                                    null,
-                                    50,
-                                    DialogAction.customClick(
-                                            (view, audience) -> setConnectionJoinResult(uuid, "Exit"),
-                                            options
-                                    )
-                            )
-                    ).build()));
+            return Dialog.create(b -> b.empty().base(DialogBase.builder(Component.text("DAuth"))
+                            .inputs(finalInputs)
+                            .body(List.of(DialogBody.plainMessage(title)))
+                            .canCloseWithEscape(canCloseWithEscape)
+                            .build())
+                    .type(DialogType.multiAction(actionButtons)
+                            .exitAction(ActionButton.create(Component.text(plugin.mes("button-quit", "Quit")), null, 50,
+                                    DialogAction.customClick((v, a) -> setRes(uuid, "Exit"), options)))
+                            .build()));
         }
 
-        //
-
-        private void authPlayer(DialogResponseView view, Audience audience, UUID uuid, AuthMode mode) {
-
-            int min = plugin.getConfig().getInt("limits.min-password-length", 1);
+        private void auth(DialogResponseView v, Audience a, UUID uuid, AuthMode mode) {
+            int min = plugin.getConfig().getInt("limits.min-password-length", 3);
             int max = plugin.getConfig().getInt("limits.max-password-length", 32);
 
-            if (mode == AuthMode.REGISTER) {
 
-                String pass1 = view.getText("password1");
-                String pass2 = view.getText("password2");
+            if (mode == AuthMode.REGISTER || mode == AuthMode.CHANGE) {
 
-                if (pass1.length() < min || pass1.length() > max ||
-                        pass2.length() < min || pass2.length() > max) {
+                String p1 = v.getText(mode == AuthMode.REGISTER ? "password1" : "new1");
+                String p2 = v.getText(mode == AuthMode.REGISTER ? "password2" : "new2");
 
-                    audience.showDialog(createDialog(
-                            AuthMode.REGISTER,
-                            Component.text(
-                                    mes("error-password-length",
-                                            "Password must be between %min% and %max% characters."),
-                                    TextColor.color(220, 20, 60)
-                            ),
-                            uuid
-                    ));
+                if (p1.length() < min || p1.length() > max) {
+                    a.showDialog(createDialog(mode, Component.text(plugin.mes("error-password-length", "Length error")).color(TextColor.color(220, 20, 60)), uuid));
+                    return;
+                } else if (p2 != null) {
+                    if (p2.length() < min || p2.length() > max) {
+                        a.showDialog(createDialog(mode, Component.text(plugin.mes("error-password-length", "Length error")).color(TextColor.color(220, 20, 60)), uuid));
+                        return;
+                    }
+                }
+
+                if (!p1.equals(p2) || p1.contains(" ") || p1.isBlank()) {
+                    a.showDialog(createDialog(mode, Component.text(plugin.mes("error-password-mismatch", "Mismatch/Space error")).color(TextColor.color(220, 20, 60)), uuid));
                     return;
                 }
 
-                if (!Objects.equals(pass1, pass2) || pass1.contains(" ") || pass1.isBlank()) {
-                    audience.showDialog(createDialog(
-                            AuthMode.REGISTER,
-                            Component.text(
-                                    mes("error-password-mismatch", "Passwords do not match."),
-                                    TextColor.color(220, 20, 60)
-                            ),
-                            uuid
-                    ));
+                if (mode == AuthMode.CHANGE && !plugin.db().getPassword(uuid).equals(v.getText("old"))) {
+                    a.showDialog(createDialog(mode, Component.text(plugin.mes("error-wrong-password", "Wrong old")).color(TextColor.color(220, 20, 60)), uuid));
                     return;
                 }
 
-                plugin.db().saveUser(uuid, pass1);
-                setConnectionJoinResult(uuid, "Done");
+                plugin.db().saveUser(uuid, p1);
+                if (mode == AuthMode.CHANGE) {
+                    a.closeDialog();
+                    ((Player)a).sendMessage(plugin.mes("password-change-success", "Changed!"));
+                } else {
+                    setRes(uuid, "Done");
+                }
                 return;
             }
+
 
             if (mode == AuthMode.LOGIN) {
-                String pass1 = view.getText("password1");
-
-                if (plugin.db().getPassword(uuid).equals(pass1)) {
-                    setConnectionJoinResult(uuid, "Done");
+                if (!plugin.db().getPassword(uuid).equals(v.getText("password1"))) {
+                    handleWrong(a, uuid, mode);
                     return;
                 }
 
-                wrongs.merge(uuid, 1, Integer::sum);
-
-                if (wrongs.get(uuid) >= 3) {
-                    setConnectionJoinResult(uuid, "Wrong password");
-                    return;
+                if (plugin.db().get2FASecret(uuid) != null) {
+                    wrongs.put(uuid, 0);
+                    a.showDialog(createDialog(AuthMode.VERIFY_2FA, Component.text("Enter 2FA Code").color(NamedTextColor.AQUA), uuid));
+                } else {
+                    setRes(uuid, "Done");
                 }
-
-                audience.showDialog(createDialog(
-                        AuthMode.LOGIN,
-                        Component.text(
-                                mes("error-wrong-password", "Wrong password."),
-                                TextColor.color(220, 20, 60)
-                        ),
-                        uuid
-                ));
                 return;
             }
 
-            if (mode == AuthMode.CHANGE) {
-                String oldReal = plugin.db().getPassword(uuid);
 
-                String oldEntered = view.getText("old");
-                String new1 = view.getText("new1");
-                String new2 = view.getText("new2");
-
-                if (!oldReal.equals(oldEntered)) {
-                    audience.showDialog(createDialog(
-                            AuthMode.CHANGE,
-                            Component.text(
-                                    mes("error-wrong-password", "Wrong password."),
-                                    TextColor.color(220, 20, 60)
-                            ),
-                            uuid
-                    ));
-                    return;
-                }
-
-                if (new1.length() < min || new1.length() > max ||
-                        new2.length() < min || new2.length() > max) {
-
-                    audience.showDialog(createDialog(
-                            AuthMode.CHANGE,
-                            Component.text(
-                                    mes("error-password-length",
-                                            "Password must be between %min% and %max% characters."),
-                                    TextColor.color(220, 20, 60)
-                            ),
-                            uuid
-                    ));
-                    return;
-                }
-
-                if (!Objects.equals(new1, new2) || new1.contains(" ") || new1.isBlank()) {
-                    audience.showDialog(createDialog(
-                            AuthMode.CHANGE,
-                            Component.text(
-                                    mes("error-password-mismatch", "Passwords do not match."),
-                                    TextColor.color(220, 20, 60)
-                            ),
-                            uuid
-                    ));
-                    return;
-                }
-
-                plugin.db().saveUser(uuid, new1);
-
-                audience.closeDialog();
-                if (audience instanceof Player player) {
-                    player.sendMessage(
-                            ChatColor.translateAlternateColorCodes('&',
-                                    plugin.getConfig().getString(
-                                            "messages.password-change-success",
-                                            "&aPassword changed successfully!"
-                                    )
-                            )
-                    );
-                }
+            if (mode == AuthMode.VERIFY_2FA) {
+                try {
+                    String codeStr = v.getText("code").trim();
+                    if (gAuth.authorize(plugin.db().get2FASecret(uuid), Integer.parseInt(codeStr))) {
+                        setRes(uuid, "Done");
+                    } else {
+                        handleWrong(a, uuid, mode);
+                    }
+                } catch (Exception e) { handleWrong(a, uuid, mode); }
             }
         }
 
-        //
-
-        private void setConnectionJoinResult(UUID uniqueId, String value) {
-            CompletableFuture<String> future = awaitingResponse.get(uniqueId);
-            if (future != null) {
-                future.complete(value);
+        private void handleWrong(Audience a, UUID uuid, AuthMode mode) {
+            wrongs.merge(uuid, 1, Integer::sum);
+            if (wrongs.get(uuid) >= 3) {
+                setRes(uuid, "Wrong password");
+            } else {
+                a.showDialog(createDialog(mode, Component.text(plugin.mes("error-wrong-password", "Wrong!")).color(TextColor.color(220, 20, 60)), uuid));
             }
         }
 
-        //
-
-        private String mes(String key, String alt) {
-            String raw = plugin.getConfig().getString("messages." + key, alt);
-
-            int min = plugin.getConfig().getInt("limits.min-password-length", 1);
-            int max = plugin.getConfig().getInt("limits.max-password-length", 32);
-
-            raw = ChatColor.translateAlternateColorCodes('&', raw);
-
-            return raw.replace("%min%", String.valueOf(min))
-                    .replace("%max%", String.valueOf(max));
+        private void setRes(UUID id, String val) {
+            if (awaitingResponse.containsKey(id)) awaitingResponse.get(id).complete(val);
         }
     }
 }

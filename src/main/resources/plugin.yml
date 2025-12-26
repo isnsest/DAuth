@@ -1,5 +1,5 @@
 name: DAuth
-version: '1.1'
+version: '1.3'
 main: org.isnsest.dauth.DAuth
 api-version: '1.21'
 author: isnsest
@@ -9,8 +9,18 @@ commands:
     description: Change your password
     aliases:
       - changepass
+      - cpass
     usage: /changepassword
   dreload:
     description: Reload config
     permission: dauth.reload
     usage: /dreload
+  2fa:
+    description: 2FA
+    usage: /2fa
+  unregister:
+    description: Unregister
+    usage: /unregister
+  logout:
+    description: Logout
+    usage: /logout

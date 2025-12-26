@@ -31,22 +31,36 @@ public class Database {
         try (Connection con = getConnection();
              Statement st = con.createStatement()) {
 
+
             st.execute("""
                     CREATE TABLE IF NOT EXISTS users (
                         uuid TEXT PRIMARY KEY,
-                        password TEXT NOT NULL
+                        password TEXT NOT NULL,
+                        secret TEXT
                     )
             """);
 
-        }
-        catch (SQLException e) {
+
+
+            try {
+                st.execute("ALTER TABLE users ADD COLUMN secret TEXT");
+            } catch (SQLException ignored) {
+
+            }
+
+        } catch (SQLException e) {
             plugin.getLogger().severe("Failed to initialize SQLite database!");
             e.printStackTrace();
         }
     }
 
     public void saveUser(UUID uuid, String password) {
-        String sql = "INSERT OR REPLACE INTO users(uuid, password) VALUES (?, ?)";
+
+
+        String sql = """
+            INSERT INTO users(uuid, password) VALUES (?, ?)
+            ON CONFLICT(uuid) DO UPDATE SET password = excluded.password
+        """;
 
         try (Connection con = getConnection();
              PreparedStatement ps = con.prepareStatement(sql)) {
@@ -54,10 +68,60 @@ public class Database {
             ps.setString(1, uuid.toString());
             ps.setString(2, password);
             ps.executeUpdate();
-        }
-        catch (SQLException e) {
+        } catch (SQLException e) {
             e.printStackTrace();
         }
+    }
+
+
+    public void save2FASecret(UUID uuid, String secret) {
+
+        String sql = "UPDATE users SET secret = ? WHERE uuid = ?";
+
+        try (Connection con = getConnection();
+             PreparedStatement ps = con.prepareStatement(sql)) {
+
+            ps.setString(1, secret);
+            ps.setString(2, uuid.toString());
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+    }
+
+
+    public void remove2FASecret(UUID uuid) {
+        String sql = "UPDATE users SET secret = NULL WHERE uuid = ?";
+
+        try (Connection con = getConnection();
+             PreparedStatement ps = con.prepareStatement(sql)) {
+
+            ps.setString(1, uuid.toString());
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+    }
+
+
+    public String get2FASecret(UUID uuid) {
+        String sql = "SELECT secret FROM users WHERE uuid = ?";
+
+        try (Connection con = getConnection();
+             PreparedStatement ps = con.prepareStatement(sql)) {
+
+            ps.setString(1, uuid.toString());
+
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getString("secret");
+                }
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+
+        return null;
     }
 
     public String getPassword(UUID uuid) {
@@ -73,8 +137,7 @@ public class Database {
                     return rs.getString("password");
                 }
             }
-        }
-        catch (SQLException e) {
+        } catch (SQLException e) {
             e.printStackTrace();
         }
 
@@ -89,8 +152,7 @@ public class Database {
 
             ps.setString(1, uuid.toString());
             ps.executeUpdate();
-        }
-        catch (SQLException e) {
+        } catch (SQLException e) {
             e.printStackTrace();
         }
     }
