@@ -82,7 +82,7 @@ public final class DAuth extends JavaPlugin {
 
             UUID uuid = player.getUniqueId();
 
-            if (database.getPassword(uuid) == null) {
+            if (!database.isRegistered(uuid)) {
                 player.sendMessage(ChatColor.RED + "You are not registered.");
                 return true;
             }
@@ -108,7 +108,7 @@ public final class DAuth extends JavaPlugin {
                 return true;
             }
             UUID uuid = player.getUniqueId();
-            if (database.getPassword(uuid) == null) {
+            if (!database.isRegistered(uuid)) {
                 player.sendMessage(ChatColor.RED + "You are not registered.");
                 return true;
             }
@@ -125,7 +125,6 @@ public final class DAuth extends JavaPlugin {
     public Database db() {
         return database;
     }
-
 
     public String mes(String key, String def) {
         String raw = getConfig().getString("messages." + key, def);
@@ -171,12 +170,12 @@ public final class DAuth extends JavaPlugin {
 
             UUID id = connection.getProfile().getId();
             if (id == null) return;
-            if (LogoutTimerManager.ipList.contains(ip) && plugin.db().getPassword(id) != null) {
+            if (LogoutTimerManager.ipList.contains(ip) && plugin.db().isRegistered(id)) {
                 LogoutTimerManager.cancelTimer(id);
                 return;
             }
 
-            AuthMode mode = plugin.db().getPassword(id) == null ? AuthMode.REGISTER : AuthMode.LOGIN;
+            AuthMode mode = !plugin.db().isRegistered(id) ? AuthMode.REGISTER : AuthMode.LOGIN;
 
             Dialog dialog = createDialog(mode, Component.text(plugin.mes("title", "Auth required")), id);
 
@@ -187,38 +186,19 @@ public final class DAuth extends JavaPlugin {
             awaitingResponse.put(id, response);
             connection.getAudience().showDialog(dialog);
 
-
             String res = response.join();
 
             awaitingResponse.remove(id);
             wrongs.remove(id);
 
-
             switch (res) {
-                case "Timeout" -> {
-                    connection.getAudience().closeDialog();
-                    connection.disconnect(Component.text(plugin.mes("error-timeout", "Authentication timeout.")));
-                }
-                case "Wrong password" -> {
-                    connection.getAudience().closeDialog();
-                    connection.disconnect(Component.text(plugin.mes("error-wrong-password", "Wrong password.")));
-                }
-                case "Exit" -> {
-                    connection.getAudience().closeDialog();
-                    connection.disconnect(Component.text(plugin.mes("quit", "You have left the server.")));
-                }
-                case "Done" -> {
-                    connection.getAudience().closeDialog();
-                    LogoutTimerManager.ipList.add(ip);
-                }
-
-                default -> {
-                    connection.getAudience().closeDialog();
-                    connection.disconnect(Component.text(plugin.mes("error-generic", res)));
-                }
+                case "Timeout" -> { connection.getAudience().closeDialog(); connection.disconnect(Component.text(plugin.mes("error-timeout", "Authentication timeout."))); }
+                case "Wrong password" -> { connection.getAudience().closeDialog(); connection.disconnect(Component.text(plugin.mes("error-wrong-password", "Wrong password."))); }
+                case "Exit" -> { connection.getAudience().closeDialog(); connection.disconnect(Component.text(plugin.mes("quit", "You have left the server."))); }
+                case "Done" -> { connection.getAudience().closeDialog(); LogoutTimerManager.ipList.add(ip); }
+                default -> { connection.getAudience().closeDialog(); connection.disconnect(Component.text(plugin.mes("error-generic", res))); }
             }
         }
-
 
         @EventHandler
         public void onLogin(PlayerLoginEvent event) {
@@ -324,7 +304,7 @@ public final class DAuth extends JavaPlugin {
                     return;
                 }
 
-                if (mode == AuthMode.CHANGE && !plugin.db().getPassword(uuid).equals(v.getText("old"))) {
+                if (mode == AuthMode.CHANGE && !plugin.db().checkPassword(uuid, v.getText("old"))) {
                     a.showDialog(createDialog(mode, Component.text(plugin.mes("error-wrong-password", "Wrong old")).color(TextColor.color(220, 20, 60)), uuid));
                     return;
                 }
@@ -341,7 +321,7 @@ public final class DAuth extends JavaPlugin {
 
 
             if (mode == AuthMode.LOGIN) {
-                if (!plugin.db().getPassword(uuid).equals(v.getText("password1"))) {
+                if (!plugin.db().checkPassword(uuid, v.getText("password1"))) {
                     handleWrong(a, uuid, mode);
                     return;
                 }
