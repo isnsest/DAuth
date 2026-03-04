@@ -42,6 +42,9 @@ public final class DAuth extends JavaPlugin {
     public void onEnable() {
         saveDefaultConfig();
         database = new Database(this);
+
+        LogoutTimerManager.loadSessionsFromDb(database, LogoutTimerManager::removeSession);
+
         Bukkit.getPluginManager().registerEvents(new EventListener(this), this);
 
         getCommand("logout").setExecutor((sender, command, label, args) -> {
@@ -118,7 +121,9 @@ public final class DAuth extends JavaPlugin {
     }
 
     @Override
-    public void onDisable() {}
+    public void onDisable() {
+        LogoutTimerManager.saveSessionsToDb(database, getConfig().getInt("limits.session", 300));
+    }
 
     public Database db() {
         return database;

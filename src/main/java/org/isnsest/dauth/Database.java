@@ -5,6 +5,8 @@ import org.mindrot.jbcrypt.BCrypt;
 
 import java.io.File;
 import java.sql.*;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 
 public class Database {
@@ -32,15 +34,15 @@ public class Database {
              Statement st = con.createStatement()) {
 
             st.execute("""
-                    CREATE TABLE IF NOT EXISTS users (
-                        uuid TEXT PRIMARY KEY,
-                        password TEXT NOT NULL,
-                        secret TEXT
-                    )
-            """);
-
+                CREATE TABLE IF NOT EXISTS users (
+                    uuid TEXT PRIMARY KEY,
+                    password TEXT NOT NULL,
+                    secret TEXT,
+                    timer TEXT
+                )
+        """);
             try {
-                st.execute("ALTER TABLE users ADD COLUMN secret TEXT");
+                st.execute("ALTER TABLE users ADD COLUMN timer TEXT");
             } catch (SQLException ignored) {
             }
 
@@ -49,6 +51,52 @@ public class Database {
             e.printStackTrace();
         }
     }
+
+
+
+    public void saveBatchTimers(Map<UUID, String> data) {
+        String sql = "UPDATE users SET timer = ? WHERE uuid = ?";
+        try (Connection con = getConnection();
+             PreparedStatement ps = con.prepareStatement(sql)) {
+            con.setAutoCommit(false);
+            for (Map.Entry<UUID, String> entry : data.entrySet()) {
+                ps.setString(1, entry.getValue());
+                ps.setString(2, entry.getKey().toString());
+                ps.addBatch();
+            }
+            ps.executeBatch();
+            con.commit();
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+    }
+
+    public Map<UUID, String> loadAllTimers() {
+        Map<UUID, String> map = new HashMap<>();
+        String sql = "SELECT uuid, timer FROM users WHERE timer IS NOT NULL";
+        try (Connection con = getConnection();
+             Statement st = con.createStatement();
+             ResultSet rs = st.executeQuery(sql)) {
+            while (rs.next()) {
+                map.put(UUID.fromString(rs.getString("uuid")), rs.getString("timer"));
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return map;
+    }
+
+    public void clearAllTimers() {
+        String sql = "UPDATE users SET timer = NULL";
+        try (Connection con = getConnection();
+             Statement st = con.createStatement()) {
+            st.executeUpdate(sql);
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+    }
+
+
 
     public void saveUser(UUID uuid, String rawPassword) {
         String hashedPassword = BCrypt.hashpw(rawPassword, BCrypt.gensalt());
