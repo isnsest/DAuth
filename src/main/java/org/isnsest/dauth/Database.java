@@ -34,17 +34,21 @@ public class Database {
              Statement st = con.createStatement()) {
 
             st.execute("""
-                CREATE TABLE IF NOT EXISTS users (
-                    uuid TEXT PRIMARY KEY,
-                    password TEXT NOT NULL,
-                    secret TEXT,
-                    timer TEXT
-                )
+            CREATE TABLE IF NOT EXISTS users (
+                uuid TEXT PRIMARY KEY,
+                password TEXT NOT NULL,
+                secret TEXT,
+                timer TEXT
+            )
         """);
+
+            try {
+                st.execute("ALTER TABLE users ADD COLUMN secret TEXT");
+            } catch (SQLException ignored) {}
+
             try {
                 st.execute("ALTER TABLE users ADD COLUMN timer TEXT");
-            } catch (SQLException ignored) {
-            }
+            } catch (SQLException ignored) {}
 
         } catch (SQLException e) {
             plugin.getLogger().severe("Failed to initialize SQLite database!");
